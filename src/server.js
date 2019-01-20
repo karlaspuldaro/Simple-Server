@@ -8,6 +8,7 @@ const express = require('express');
 const app = express();
 const port = 80;
 const bodyParser = require('body-parser');
+const httpStatus = require ('http-status-codes');
 
 //json object containing a list of all products. Ideally this would be in a proper database.
 const products = {
@@ -15,6 +16,14 @@ const products = {
     2: {title: 'cat_food_original', price: 1.5, inventory_count: 4},
     3: {title: 'cat_food_senior', price: 2.6, inventory_count: 8}
 };
+
+// create a set of available product keys only, in order to fetch products that can be purchased more efficiently
+const availableProductKeys = new Set();
+for (let key in products) {
+    if (products[key].inventory_count > 0){
+        availableProductKeys.add(key);
+    }          
+}
 
 app.use(bodyParser.json());
 
@@ -27,42 +36,43 @@ app.get('/', (req, res) => res.send('Welcome to Cat Foodies! =^..^='));
 
 app.listen(port, () => console.log(`App is listening on port ${port}!`));
 
-app.get('/products', (req,res) => {
+app.get('/products', (req, res) => {
     const prods = fetchProducts(req.query && req.query.available === 'true');
-    Object.keys(prods).length ? res.json(prods) : res.sendStatus(404);
+    res.json(prods);
 });
 
-app.get('/products/:id', (req,res) => {
+app.get('/products/:id', (req, res) => {
     const id = req.params.id;
     const prod = fetchProductById(id);
-    prod ? res.json(prod) : res.sendStatus(404);
+    prod ? res.json(prod) : res.status(httpStatus.NOT_FOUND).json({error: 'product not found'});
 });
 
-app.put('/products/:id', (req,res) => {
+app.put('/products/:id', (req, res) => {
     const id = req.params.id;
     let prod = fetchProductById(id);
-    if (prod && req.body && req.body.action === 'purchase' && prod.inventory_count > 0){
-        res.json(purchaseProduct(id));
+    if (prod && req.body && req.body.action === 'purchase') {
+        if (prod.inventory_count === 0) {
+            res.status(httpStatus.BAD_REQUEST).json({error: 'product cannot be purchased'});
+
+        } else {
+            res.json(purchaseProduct(id));
+        }
     }
-    else{
-        res.sendStatus(404);
+    else {
+        res.status(httpStatus.NOT_FOUND).json({error: 'product not found'});
     }
 });
 
-const fetchProducts = (available) => {
+const fetchProducts = available => {
     console.log('fetching products...');
     
     if (available){
-        let listOfAvailableProds = {};
-        // loop through products and only get the ones available
-        // This could be fetched directly with a databse query with an index for inventory_count, to make the fetch more efficient than copying objects to the local variable above.
+        let availableProds = {};
         
-        for (let key in products) {
-            if (products[key].inventory_count > 0){
-                listOfAvailableProds[key] = products[key];
-            }          
+        for (let key of availableProductKeys) {
+            availableProds[key] = products[key];       
         };
-        return listOfAvailableProds;
+        return availableProds;
     }
     return products;
 };
@@ -76,5 +86,10 @@ const purchaseProduct = (id) => {
     console.log('purchasing product ');
     
     products[id].inventory_count --;
+
+    if (products[id].inventory_count == 0) {
+        availableProductKeys.delete(id);
+    }
+
     return products[id];
 };
